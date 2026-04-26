@@ -30,6 +30,7 @@ st.markdown("""
 
 .card {
     background: white;
+    color: #111827;
     padding: 22px;
     border-radius: 14px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.08);
@@ -39,6 +40,7 @@ st.markdown("""
 
 .card-red {
     background: #fff7f7;
+    color: #111827;
     padding: 22px;
     border-radius: 14px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.08);
@@ -48,6 +50,7 @@ st.markdown("""
 
 .card-green {
     background: #f0fdf4;
+    color: #111827;
     padding: 22px;
     border-radius: 14px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.08);
@@ -57,6 +60,7 @@ st.markdown("""
 
 .risk-high {
     background-color: #fee2e2;
+    color: #111827;
     padding: 18px;
     border-radius: 12px;
     color: #991b1b;
@@ -67,6 +71,7 @@ st.markdown("""
 
 .risk-low {
     background-color: #dcfce7;
+    color: #111827;
     padding: 18px;
     border-radius: 12px;
     color: #166534;
