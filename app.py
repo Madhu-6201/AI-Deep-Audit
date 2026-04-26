@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import pickle
 import numpy as np
+import plotly.graph_objects as go
 from io import BytesIO
 from datetime import datetime
 
@@ -92,6 +93,67 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+
+
+# ---------------- RISK GAUGE ----------------
+def show_risk_gauge(risk_score, threshold):
+    """Display a semicircle risk gauge like a fintech/audit dashboard."""
+    threshold_score = round(threshold * 100, 2)
+    delta_value = round(risk_score - threshold_score, 2)
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=risk_score,
+        number={
+            "suffix": "%",
+            "font": {"size": 46, "color": "#f8fafc"}
+        },
+        delta={
+            "reference": threshold_score,
+            "relative": False,
+            "valueformat": ".1f",
+            "font": {"size": 22},
+            "increasing": {"color": "#ef4444"},
+            "decreasing": {"color": "#10b981"}
+        },
+        title={
+            "text": "<b>Risk Score</b>",
+            "font": {"size": 22, "color": "#94a3b8"}
+        },
+        gauge={
+            "shape": "angular",
+            "axis": {
+                "range": [0, 100],
+                "tickwidth": 1,
+                "tickcolor": "#94a3b8",
+                "tickfont": {"color": "#f8fafc"}
+            },
+            "bar": {"color": "#10b981" if risk_score < threshold_score else "#ef4444", "thickness": 0.22},
+            "bgcolor": "rgba(0,0,0,0)",
+            "borderwidth": 0,
+            "steps": [
+                {"range": [0, threshold_score], "color": "rgba(16,185,129,0.35)"},
+                {"range": [threshold_score, 70], "color": "rgba(245,158,11,0.28)"},
+                {"range": [70, 100], "color": "rgba(239,68,68,0.30)"}
+            ],
+            "threshold": {
+                "line": {"color": "#ef4444", "width": 4},
+                "thickness": 0.85,
+                "value": threshold_score
+            }
+        },
+        domain={"x": [0, 1], "y": [0, 1]}
+    ))
+
+    fig.update_layout(
+        height=330,
+        margin=dict(l=20, r=20, t=50, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": "#f8fafc"}
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 # ---------------- MODEL LOADING ----------------
 @st.cache_resource
@@ -377,6 +439,10 @@ with col_res:
         m1.metric("Risk Score", f"{risk_score}%")
         m2.metric("Model", "XGBoost")
         m3.metric("Threshold", threshold)
+
+        # -------- RISK GAUGE --------
+        st.subheader("Risk Score Gauge")
+        show_risk_gauge(risk_score, threshold)
 
         # -------- REASONS --------
         st.subheader("Auditor Decision Support")
