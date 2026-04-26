@@ -265,6 +265,7 @@ with col_res:
             "lat": lat,
             "long": long,
             "city_pop": city_pop,
+            "distance_km": distance,
             "job": job,
             "unix_time": int(now.timestamp()),
             "merch_lat": merch_lat,
