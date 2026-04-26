@@ -181,6 +181,25 @@ with col_in:
             value=500000
         )
 
+        category = st.selectbox(
+            "Transaction Category",
+            [
+                "shopping_net",
+                "grocery_pos",
+                "gas_transport",
+                "misc_net",
+                "entertainment",
+                "food_dining",
+                "personal_care",
+                "health_fitness",
+                "kids_pets",
+                "home",
+                "travel"
+            ]
+        )
+
+        gender = st.selectbox("Gender", ["F", "M"])
+
     with c2:
         distance = st.number_input(
             "Distance to Merchant (km)",
@@ -195,6 +214,35 @@ with col_in:
             10
         )
 
+        state = st.selectbox(
+            "State",
+            ["CA", "TX", "NY", "FL", "PA", "OH", "IL", "GA", "NC", "MI"]
+        )
+
+        job = st.text_input("Customer Job", value="Engineer")
+
+    c3, c4 = st.columns(2)
+
+    with c3:
+        merchant = st.text_input(
+            "Merchant Name",
+            value="fraud_McDermott, Osinski and Morar"
+        )
+
+        city = st.text_input("City", value="New York")
+
+        zip_code = st.number_input(
+            "ZIP Code",
+            min_value=0,
+            value=10001
+        )
+
+    with c4:
+        lat = st.number_input("Customer Latitude", value=40.7128, format="%.4f")
+        long = st.number_input("Customer Longitude", value=-74.0060, format="%.4f")
+        merch_lat = st.number_input("Merchant Latitude", value=40.7300, format="%.4f")
+        merch_long = st.number_input("Merchant Longitude", value=-73.9900, format="%.4f")
+
 with col_res:
     st.subheader("Audit Execution")
     predict_btn = st.button("Run Forensic Audit", use_container_width=True)
@@ -202,11 +250,26 @@ with col_res:
     if predict_btn:
 
         # -------- INPUT DATA --------
+        # Important: These column names must match the columns used while training model.pkl
+        now = datetime.now()
+
         input_df = pd.DataFrame([{
+            "merchant": merchant,
+            "category": category,
             "amt": amt,
+            "amt_log": np.log1p(amt),
+            "gender": gender,
+            "city": city,
+            "state": state,
+            "zip": int(zip_code),
+            "lat": lat,
+            "long": long,
             "city_pop": city_pop,
-            "distance_km": distance,
-            "trans_hour": hour
+            "job": job,
+            "unix_time": int(now.timestamp()),
+            "merch_lat": merch_lat,
+            "merch_long": merch_long,
+            "is_weekend": 1 if now.weekday() >= 5 else 0
         }])
 
         # -------- REAL MODEL PREDICTION --------
