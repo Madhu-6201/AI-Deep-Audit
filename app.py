@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import pickle
 import numpy as np
-import plotly.graph_objects as go
 from io import BytesIO
 from datetime import datetime
 
@@ -31,7 +30,6 @@ st.markdown("""
 
 .card {
     background: white;
-    color: #111827;
     padding: 22px;
     border-radius: 14px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.08);
@@ -41,7 +39,6 @@ st.markdown("""
 
 .card-red {
     background: #fff7f7;
-    color: #111827;
     padding: 22px;
     border-radius: 14px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.08);
@@ -51,7 +48,6 @@ st.markdown("""
 
 .card-green {
     background: #f0fdf4;
-    color: #111827;
     padding: 22px;
     border-radius: 14px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.08);
@@ -61,7 +57,6 @@ st.markdown("""
 
 .risk-high {
     background-color: #fee2e2;
-    color: #111827;
     padding: 18px;
     border-radius: 12px;
     color: #991b1b;
@@ -72,7 +67,6 @@ st.markdown("""
 
 .risk-low {
     background-color: #dcfce7;
-    color: #111827;
     padding: 18px;
     border-radius: 12px;
     color: #166534;
@@ -93,67 +87,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-
-
-# ---------------- RISK GAUGE ----------------
-def show_risk_gauge(risk_score, threshold):
-    """Display a semicircle risk gauge like a fintech/audit dashboard."""
-    threshold_score = round(threshold * 100, 2)
-    delta_value = round(risk_score - threshold_score, 2)
-
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
-        value=risk_score,
-        number={
-            "suffix": "%",
-            "font": {"size": 46, "color": "#f8fafc"}
-        },
-        delta={
-            "reference": threshold_score,
-            "relative": False,
-            "valueformat": ".1f",
-            "font": {"size": 22},
-            "increasing": {"color": "#ef4444"},
-            "decreasing": {"color": "#10b981"}
-        },
-        title={
-            "text": "<b>Risk Score</b>",
-            "font": {"size": 22, "color": "#94a3b8"}
-        },
-        gauge={
-            "shape": "angular",
-            "axis": {
-                "range": [0, 100],
-                "tickwidth": 1,
-                "tickcolor": "#94a3b8",
-                "tickfont": {"color": "#f8fafc"}
-            },
-            "bar": {"color": "#10b981" if risk_score < threshold_score else "#ef4444", "thickness": 0.22},
-            "bgcolor": "rgba(0,0,0,0)",
-            "borderwidth": 0,
-            "steps": [
-                {"range": [0, threshold_score], "color": "rgba(16,185,129,0.35)"},
-                {"range": [threshold_score, 70], "color": "rgba(245,158,11,0.28)"},
-                {"range": [70, 100], "color": "rgba(239,68,68,0.30)"}
-            ],
-            "threshold": {
-                "line": {"color": "#ef4444", "width": 4},
-                "thickness": 0.85,
-                "value": threshold_score
-            }
-        },
-        domain={"x": [0, 1], "y": [0, 1]}
-    ))
-
-    fig.update_layout(
-        height=330,
-        margin=dict(l=20, r=20, t=50, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font={"color": "#f8fafc"}
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
 
 # ---------------- MODEL LOADING ----------------
 @st.cache_resource
@@ -199,61 +132,6 @@ if "history" not in st.session_state:
 if "last_prediction" not in st.session_state:
     st.session_state.last_prediction = None
 
-# ---------------- SAMPLE BUTTON HELPERS ----------------
-def load_safe_sample():
-    st.session_state.amt_input = 45.0
-    st.session_state.city_pop_input = 500000
-    st.session_state.category_input = "grocery_pos"
-    st.session_state.gender_input = "F"
-    st.session_state.distance_input = 2.0
-    st.session_state.hour_input = 12
-    st.session_state.state_input = "NY"
-    st.session_state.job_input = "Teacher"
-    st.session_state.merchant_input = "fraud_Kilback LLC"
-    st.session_state.city_input = "New York"
-    st.session_state.zip_input = 10001
-    st.session_state.lat_input = 40.7128
-    st.session_state.long_input = -74.0060
-    st.session_state.merch_lat_input = 40.7300
-    st.session_state.merch_long_input = -73.9900
-
-def load_fraud_sample():
-    st.session_state.amt_input = 15000.0
-    st.session_state.city_pop_input = 1000
-    st.session_state.category_input = "shopping_net"
-    st.session_state.gender_input = "F"
-    st.session_state.distance_input = 1200.0
-    st.session_state.hour_input = 3
-    st.session_state.state_input = "CA"
-    st.session_state.job_input = "Engineer"
-    st.session_state.merchant_input = "fraud_McDermott, Osinski and Morar"
-    st.session_state.city_input = "Los Angeles"
-    st.session_state.zip_input = 90001
-    st.session_state.lat_input = 40.7128
-    st.session_state.long_input = -74.0060
-    st.session_state.merch_lat_input = 34.0522
-    st.session_state.merch_long_input = -118.2437
-
-def set_default(key, value):
-    if key not in st.session_state:
-        st.session_state[key] = value
-
-set_default("amt_input", 1250.0)
-set_default("city_pop_input", 500000)
-set_default("category_input", "shopping_net")
-set_default("gender_input", "F")
-set_default("distance_input", 12.4)
-set_default("hour_input", 10)
-set_default("state_input", "CA")
-set_default("job_input", "Engineer")
-set_default("merchant_input", "fraud_McDermott, Osinski and Morar")
-set_default("city_input", "New York")
-set_default("zip_input", 10001)
-set_default("lat_input", 40.7128)
-set_default("long_input", -74.0060)
-set_default("merch_lat_input", 40.7300)
-set_default("merch_long_input", -73.9900)
-
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
@@ -288,27 +166,19 @@ col_in, col_res = st.columns([2, 1])
 with col_in:
     st.subheader("Transaction Metadata")
 
-    sample_col1, sample_col2 = st.columns(2)
-    with sample_col1:
-        st.button("Load Safe Transaction Sample", on_click=load_safe_sample, use_container_width=True)
-    with sample_col2:
-        st.button("Load Fraud Test Sample", on_click=load_fraud_sample, use_container_width=True)
-
-    st.caption("Demo helper: Safe Sample fills normal values. Fraud Test Sample fills suspicious values. After loading a sample, click Run Forensic Audit.")
-
     c1, c2 = st.columns(2)
 
     with c1:
         amt = st.number_input(
             "Transaction Amount ($)",
             min_value=0.0,
-            key="amt_input"
+            value=1250.0
         )
 
         city_pop = st.number_input(
             "Target City Population",
             min_value=0,
-            key="city_pop_input"
+            value=500000
         )
 
         category = st.selectbox(
@@ -325,55 +195,53 @@ with col_in:
                 "kids_pets",
                 "home",
                 "travel"
-            ],
-            key="category_input"
+            ]
         )
 
-        gender = st.selectbox("Gender", ["F", "M"], key="gender_input")
+        gender = st.selectbox("Gender", ["F", "M"])
 
     with c2:
         distance = st.number_input(
             "Distance to Merchant (km)",
             min_value=0.0,
-            key="distance_input"
+            value=12.4
         )
 
         hour = st.slider(
             "Time of Transaction (24h)",
             0,
             23,
-            key="hour_input"
+            10
         )
 
         state = st.selectbox(
             "State",
-            ["CA", "TX", "NY", "FL", "PA", "OH", "IL", "GA", "NC", "MI"],
-            key="state_input"
+            ["CA", "TX", "NY", "FL", "PA", "OH", "IL", "GA", "NC", "MI"]
         )
 
-        job = st.text_input("Customer Job", key="job_input")
+        job = st.text_input("Customer Job", value="Engineer")
 
     c3, c4 = st.columns(2)
 
     with c3:
         merchant = st.text_input(
             "Merchant Name",
-            key="merchant_input"
+            value="fraud_McDermott, Osinski and Morar"
         )
 
-        city = st.text_input("City", key="city_input")
+        city = st.text_input("City", value="New York")
 
         zip_code = st.number_input(
             "ZIP Code",
             min_value=0,
-            key="zip_input"
+            value=10001
         )
 
     with c4:
-        lat = st.number_input("Customer Latitude", format="%.4f", key="lat_input")
-        long = st.number_input("Customer Longitude", format="%.4f", key="long_input")
-        merch_lat = st.number_input("Merchant Latitude", format="%.4f", key="merch_lat_input")
-        merch_long = st.number_input("Merchant Longitude", format="%.4f", key="merch_long_input")
+        lat = st.number_input("Customer Latitude", value=40.7128, format="%.4f")
+        long = st.number_input("Customer Longitude", value=-74.0060, format="%.4f")
+        merch_lat = st.number_input("Merchant Latitude", value=40.7300, format="%.4f")
+        merch_long = st.number_input("Merchant Longitude", value=-73.9900, format="%.4f")
 
 with col_res:
     st.subheader("Audit Execution")
@@ -439,10 +307,6 @@ with col_res:
         m1.metric("Risk Score", f"{risk_score}%")
         m2.metric("Model", "XGBoost")
         m3.metric("Threshold", threshold)
-
-        # -------- RISK GAUGE --------
-        st.subheader("Risk Score Gauge")
-        show_risk_gauge(risk_score, threshold)
 
         # -------- REASONS --------
         st.subheader("Auditor Decision Support")
