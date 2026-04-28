@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import pickle
 import numpy as np
+import plotly.express as px
 from io import BytesIO
 from datetime import datetime
 
@@ -709,8 +710,24 @@ if len(st.session_state.history) > 0:
         st.markdown("### Risk Score Line Graph")
         trend_df = dashboard_df[["Time", "Risk_Score"]].copy()
         trend_df["Audit No."] = range(1, len(trend_df) + 1)
-        trend_df = trend_df.set_index("Audit No.")[["Risk_Score"]]
-        st.line_chart(trend_df)
+        trend_df["Risk_Score"] = pd.to_numeric(trend_df["Risk_Score"], errors="coerce").fillna(0)
+
+        fig_trend = px.line(
+            trend_df,
+            x="Audit No.",
+            y="Risk_Score",
+            markers=True,
+            text="Risk_Score",
+            title="Risk Score Trend Across Manual Predictions"
+        )
+        fig_trend.update_traces(texttemplate="%{text:.2f}%", textposition="top center")
+        fig_trend.update_layout(
+            yaxis_title="Risk Score (%)",
+            xaxis_title="Prediction Number",
+            yaxis=dict(range=[0, 100]),
+            height=420
+        )
+        st.plotly_chart(fig_trend, use_container_width=True)
 
 else:
     z1, z2, z3, z4, z5 = st.columns(5)
@@ -864,8 +881,22 @@ if uploaded_file is not None:
                         st.markdown("#### Risk Score Line Graph")
                         risk_line_df = result_df[["risk_score"]].copy()
                         risk_line_df["Transaction No."] = range(1, len(risk_line_df) + 1)
-                        risk_line_df = risk_line_df.set_index("Transaction No.")
-                        st.line_chart(risk_line_df)
+                        risk_line_df["risk_score"] = pd.to_numeric(risk_line_df["risk_score"], errors="coerce").fillna(0)
+
+                        fig_batch_line = px.line(
+                            risk_line_df,
+                            x="Transaction No.",
+                            y="risk_score",
+                            markers=True,
+                            title="Risk Score Trend Across Uploaded Dataset"
+                        )
+                        fig_batch_line.update_layout(
+                            yaxis_title="Risk Score (%)",
+                            xaxis_title="Transaction Number",
+                            yaxis=dict(range=[0, 100]),
+                            height=420
+                        )
+                        st.plotly_chart(fig_batch_line, use_container_width=True)
 
                     st.markdown("#### Risk Score Distribution")
                     risk_bins = pd.cut(
