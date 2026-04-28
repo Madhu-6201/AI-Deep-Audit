@@ -85,6 +85,36 @@ st.markdown("""
     color: #475569;
     font-size: 14px;
 }
+
+.kpi-card {
+    background: linear-gradient(135deg, #111827, #1e3a8a);
+    color: white;
+    padding: 18px;
+    border-radius: 16px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.18);
+    min-height: 110px;
+}
+
+.kpi-label {
+    font-size: 14px;
+    color: #cbd5e1;
+    margin-bottom: 8px;
+}
+
+.kpi-value {
+    font-size: 34px;
+    font-weight: 800;
+    color: #ffffff;
+}
+
+.dashboard-note {
+    background: #eef2ff;
+    color: #1e1b4b;
+    padding: 14px;
+    border-radius: 12px;
+    border-left: 5px solid #4f46e5;
+    margin-bottom: 12px;
+}
 </style>
 
 <div class="header-box">
@@ -225,6 +255,69 @@ def predict_uploaded_dataset(uploaded_df, model_pipeline, threshold):
     )
     return result_df, [], created_features
 
+
+
+
+# ---------------- TABLEAU-STYLE DASHBOARD HELPERS ----------------
+def render_kpi_card(label, value):
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-label">{label}</div>
+            <div class="kpi-value">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def render_plotly_bar(df, x_col, y_col, title):
+    fig = px.bar(
+        df,
+        x=x_col,
+        y=y_col,
+        text=y_col,
+        title=title,
+        template="plotly_dark"
+    )
+    fig.update_traces(textposition="outside")
+    fig.update_layout(height=420, showlegend=False, margin=dict(l=20, r=20, t=60, b=20))
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_plotly_line(df, x_col, y_col, title):
+    fig = px.line(
+        df,
+        x=x_col,
+        y=y_col,
+        markers=True,
+        title=title,
+        template="plotly_dark"
+    )
+    fig.update_layout(
+        yaxis_title="Risk Score (%)",
+        yaxis=dict(range=[0, 100]),
+        height=420,
+        margin=dict(l=20, r=20, t=60, b=20)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_plotly_histogram(df, score_col="risk_score"):
+    fig = px.histogram(
+        df,
+        x=score_col,
+        nbins=20,
+        title="Risk Score Distribution",
+        template="plotly_dark"
+    )
+    fig.update_layout(
+        xaxis_title="Risk Score (%)",
+        yaxis_title="Transaction Count",
+        height=420,
+        margin=dict(l=20, r=20, t=60, b=20)
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 # ---------------- SESSION HISTORY ----------------
 if "history" not in st.session_state:
@@ -676,24 +769,40 @@ st.info(
 
 # ---------------- AI DEEP-AUDIT DASHBOARD ----------------
 st.markdown("---")
-st.subheader("AI Deep-Audit Dashboard")
-st.write("This dashboard updates after every single transaction audit.")
+st.subheader("Tableau-Style AI Deep-Audit Dashboard")
+st.markdown(
+    """
+    <div class="dashboard-note">
+        This analytical dashboard summarizes manual transaction audits with KPI cards, fraud summary, and risk trend visualization.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 if len(st.session_state.history) > 0:
     dashboard_df = pd.DataFrame(st.session_state.history)
+    dashboard_df["Risk_Score"] = pd.to_numeric(dashboard_df["Risk_Score"], errors="coerce").fillna(0)
 
     total_predictions = len(dashboard_df)
     high_risk_count = dashboard_df["Status"].astype(str).str.contains("High Risk", case=False).sum()
     safe_count = dashboard_df["Status"].astype(str).str.contains("Safe|Verified", case=False).sum()
     avg_risk_score = dashboard_df["Risk_Score"].mean()
+    max_risk_score = dashboard_df["Risk_Score"].max()
     last_status = dashboard_df.iloc[-1]["Status"]
 
-    d1, d2, d3, d4, d5 = st.columns(5)
-    d1.metric("Total Predictions", total_predictions)
-    d2.metric("High Risk Cases", int(high_risk_count))
-    d3.metric("Safe Cases", int(safe_count))
-    d4.metric("Average Risk Score", f"{avg_risk_score:.2f}%")
-    d5.metric("Last Status", last_status)
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1:
+        render_kpi_card("Total Predictions", total_predictions)
+    with k2:
+        render_kpi_card("High Risk Cases", int(high_risk_count))
+    with k3:
+        render_kpi_card("Safe Cases", int(safe_count))
+    with k4:
+        render_kpi_card("Average Risk", f"{avg_risk_score:.2f}%")
+    with k5:
+        render_kpi_card("Max Risk", f"{max_risk_score:.2f}%")
+
+    st.caption(f"Latest prediction status: {last_status}")
 
     chart_data = pd.DataFrame({
         "Status": ["High Risk / Fraud", "Low Risk / Safe"],
@@ -703,40 +812,27 @@ if len(st.session_state.history) > 0:
     c_dash1, c_dash2 = st.columns(2)
 
     with c_dash1:
-        st.markdown("### Fraud vs Safe Summary")
-        st.bar_chart(chart_data.set_index("Status"))
+        render_plotly_bar(chart_data, "Status", "Count", "Fraud vs Safe Summary")
 
     with c_dash2:
-        st.markdown("### Risk Score Line Graph")
         trend_df = dashboard_df[["Time", "Risk_Score"]].copy()
         trend_df["Audit No."] = range(1, len(trend_df) + 1)
-        trend_df["Risk_Score"] = pd.to_numeric(trend_df["Risk_Score"], errors="coerce").fillna(0)
-
-        fig_trend = px.line(
-            trend_df,
-            x="Audit No.",
-            y="Risk_Score",
-            markers=True,
-            text="Risk_Score",
-            title="Risk Score Trend Across Manual Predictions"
-        )
-        fig_trend.update_traces(texttemplate="%{text:.2f}%", textposition="top center")
-        fig_trend.update_layout(
-            yaxis_title="Risk Score (%)",
-            xaxis_title="Prediction Number",
-            yaxis=dict(range=[0, 100]),
-            height=420
-        )
-        st.plotly_chart(fig_trend, use_container_width=True)
+        render_plotly_line(trend_df, "Audit No.", "Risk_Score", "Risk Score Trend Across Manual Predictions")
 
 else:
-    z1, z2, z3, z4, z5 = st.columns(5)
-    z1.metric("Total Predictions", 0)
-    z2.metric("High Risk Cases", 0)
-    z3.metric("Safe Cases", 0)
-    z4.metric("Average Risk Score", "0.00%")
-    z5.metric("Last Status", "N/A")
-    st.info("Run at least one forensic audit to activate the dashboard and line graph.")
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1:
+        render_kpi_card("Total Predictions", 0)
+    with k2:
+        render_kpi_card("High Risk Cases", 0)
+    with k3:
+        render_kpi_card("Safe Cases", 0)
+    with k4:
+        render_kpi_card("Average Risk", "0.00%")
+    with k5:
+        render_kpi_card("Max Risk", "0.00%")
+
+    st.info("Run at least one forensic audit to activate the dashboard charts.")
 
 
 # ---------------- PREDICTION HISTORY TABLE ----------------
@@ -866,51 +962,51 @@ if uploaded_file is not None:
                     b6.metric("Maximum Risk", f"{max_risk:.2f}%")
                     b7.metric("Minimum Risk", f"{min_risk:.2f}%")
 
-                    st.markdown("### Uploaded Dataset Dashboard")
+                    st.markdown("### Tableau-Style Uploaded Dataset Dashboard")
+                    st.markdown(
+                        """
+                        <div class="dashboard-note">
+                            This dashboard updates according to the uploaded dataset and shows dataset-level fraud analysis.
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    t1, t2, t3, t4, t5 = st.columns(5)
+                    with t1:
+                        render_kpi_card("Total Transactions", total_rows)
+                    with t2:
+                        render_kpi_card("High Risk", int(fraud_count))
+                    with t3:
+                        render_kpi_card("Safe", int(safe_count))
+                    with t4:
+                        render_kpi_card("Fraud %", f"{fraud_percentage:.2f}%")
+                    with t5:
+                        render_kpi_card("Max Risk", f"{max_risk:.2f}%")
+
                     bd1, bd2 = st.columns(2)
 
                     with bd1:
-                        st.markdown("#### Fraud vs Safe Count")
                         batch_summary = pd.DataFrame({
                             "Prediction": ["High Risk / Fraud", "Low Risk / Safe"],
                             "Count": [int(fraud_count), int(safe_count)]
                         })
-                        st.bar_chart(batch_summary.set_index("Prediction"))
+                        render_plotly_bar(batch_summary, "Prediction", "Count", "Fraud vs Safe Count")
 
                     with bd2:
-                        st.markdown("#### Risk Score Line Graph")
                         risk_line_df = result_df[["risk_score"]].copy()
                         risk_line_df["Transaction No."] = range(1, len(risk_line_df) + 1)
                         risk_line_df["risk_score"] = pd.to_numeric(risk_line_df["risk_score"], errors="coerce").fillna(0)
+                        render_plotly_line(risk_line_df, "Transaction No.", "risk_score", "Risk Score Trend Across Uploaded Dataset")
 
-                        fig_batch_line = px.line(
-                            risk_line_df,
-                            x="Transaction No.",
-                            y="risk_score",
-                            markers=True,
-                            title="Risk Score Trend Across Uploaded Dataset"
-                        )
-                        fig_batch_line.update_layout(
-                            yaxis_title="Risk Score (%)",
-                            xaxis_title="Transaction Number",
-                            yaxis=dict(range=[0, 100]),
-                            height=420
-                        )
-                        st.plotly_chart(fig_batch_line, use_container_width=True)
+                    bd3, bd4 = st.columns(2)
+                    with bd3:
+                        render_plotly_histogram(result_df, "risk_score")
 
-                    st.markdown("#### Risk Score Distribution")
-                    risk_bins = pd.cut(
-                        result_df["risk_score"],
-                        bins=[0, 25, 50, 75, 100],
-                        labels=["Low Risk", "Moderate Risk", "High Risk", "Critical Risk"],
-                        include_lowest=True
-                    )
-                    risk_distribution = risk_bins.value_counts().sort_index()
-                    st.bar_chart(risk_distribution)
-
-                    st.markdown("#### Top 10 High-Risk Transactions")
-                    top_risky = result_df.sort_values(by="risk_score", ascending=False).head(10)
-                    st.dataframe(top_risky, use_container_width=True)
+                    with bd4:
+                        top_risky_chart = result_df.sort_values(by="risk_score", ascending=False).head(10).copy()
+                        top_risky_chart["Transaction"] = range(1, len(top_risky_chart) + 1)
+                        render_plotly_bar(top_risky_chart, "Transaction", "risk_score", "Top 10 High-Risk Transactions")
 
                     if "category" in result_df.columns:
                         st.markdown("#### Category-wise Average Risk")
@@ -920,7 +1016,7 @@ if uploaded_file is not None:
                             .sort_values(ascending=False)
                             .reset_index()
                         )
-                        st.bar_chart(category_risk.set_index("category"))
+                        render_plotly_bar(category_risk, "category", "risk_score", "Category-wise Average Risk")
 
                     if "state" in result_df.columns:
                         st.markdown("#### State-wise Average Risk")
@@ -930,7 +1026,11 @@ if uploaded_file is not None:
                             .sort_values(ascending=False)
                             .reset_index()
                         )
-                        st.bar_chart(state_risk.set_index("state"))
+                        render_plotly_bar(state_risk, "state", "risk_score", "State-wise Average Risk")
+
+                    st.markdown("#### Top 10 High-Risk Transactions Table")
+                    top_risky = result_df.sort_values(by="risk_score", ascending=False).head(10)
+                    st.dataframe(top_risky, use_container_width=True)
 
                     st.subheader("Batch Prediction Results")
                     st.dataframe(result_df, use_container_width=True)
