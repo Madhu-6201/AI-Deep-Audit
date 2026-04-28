@@ -130,6 +130,59 @@ except Exception as e:
     st.stop()
 
 
+
+
+# ---------------- BATCH DATASET PREDICTION FUNCTION ----------------
+def predict_uploaded_dataset(uploaded_df, model_pipeline, threshold):
+    uploaded_df = uploaded_df.copy()
+
+    # Automatically create amt_log if the user uploaded only amt
+    if "amt" in uploaded_df.columns and "amt_log" not in uploaded_df.columns:
+        uploaded_df["amt_log"] = np.log1p(pd.to_numeric(uploaded_df["amt"], errors="coerce"))
+
+    required_columns = [
+        "merchant", "category", "amt", "amt_log", "gender", "city", "state",
+        "zip", "lat", "long", "city_pop", "distance_km", "job", "unix_time",
+        "merch_lat", "merch_long", "is_weekend"
+    ]
+
+    missing_columns = [col for col in required_columns if col not in uploaded_df.columns]
+    if missing_columns:
+        return None, missing_columns
+
+    input_df = uploaded_df[required_columns].copy()
+
+    numeric_cols = [
+        "amt", "amt_log", "zip", "lat", "long", "city_pop", "distance_km",
+        "unix_time", "merch_lat", "merch_long", "is_weekend"
+    ]
+
+    for col in numeric_cols:
+        input_df[col] = pd.to_numeric(input_df[col], errors="coerce")
+
+    valid_index = input_df.dropna().index
+    input_df = input_df.loc[valid_index]
+
+    if input_df.empty:
+        return "empty", []
+
+    try:
+        fraud_prob = model_pipeline.predict_proba(input_df)[:, 1]
+    except Exception:
+        fraud_prob = model_pipeline.predict(input_df).astype(float)
+
+    result_df = uploaded_df.loc[valid_index].copy()
+    result_df["fraud_probability"] = fraud_prob
+    result_df["risk_score"] = (fraud_prob * 100).round(2)
+    result_df["prediction"] = np.where(
+        fraud_prob >= threshold,
+        "High Risk / Fraud",
+        "Low Risk / Safe"
+    )
+
+    return result_df, []
+
+
 # ---------------- SESSION HISTORY ----------------
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -596,6 +649,110 @@ if len(st.session_state.history) > 0:
     )
 else:
     st.info("No predictions yet. Run forensic audit to see history.")
+
+
+
+
+# ---------------- BATCH DATASET PREDICTION ----------------
+st.markdown("---")
+st.subheader("Batch Fraud Detection Using Uploaded Dataset")
+
+st.write("""
+Upload your own transaction dataset in CSV or Excel format. The trained XGBoost pipeline will generate fraud probability, risk score, and fraud/safe prediction for every row.
+""")
+
+required_columns = [
+    "merchant", "category", "amt", "amt_log", "gender", "city", "state",
+    "zip", "lat", "long", "city_pop", "distance_km", "job", "unix_time",
+    "merch_lat", "merch_long", "is_weekend"
+]
+
+with st.expander("Required Dataset Format"):
+    st.write("Your uploaded dataset should contain these columns. If `amt_log` is missing, the app will create it automatically from `amt`.")
+    st.code(", ".join(required_columns), language="text")
+
+    template_df = pd.DataFrame(columns=required_columns)
+    template_csv = template_df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="Download Required Dataset Template",
+        data=template_csv,
+        file_name="required_dataset_template.csv",
+        mime="text/csv"
+    )
+
+uploaded_file = st.file_uploader("Upload transaction dataset", type=["csv", "xlsx"])
+
+if uploaded_file is not None:
+    try:
+        if uploaded_file.name.endswith(".csv"):
+            uploaded_df = pd.read_csv(uploaded_file)
+        else:
+            uploaded_df = pd.read_excel(uploaded_file)
+
+        st.success("Dataset uploaded successfully.")
+        st.write("Uploaded dataset shape:", uploaded_df.shape)
+
+        st.subheader("Uploaded Dataset Preview")
+        st.dataframe(uploaded_df.head(10), use_container_width=True)
+
+        if "amt" in uploaded_df.columns and "amt_log" not in uploaded_df.columns:
+            uploaded_df["amt_log"] = np.log1p(pd.to_numeric(uploaded_df["amt"], errors="coerce"))
+            st.info("`amt_log` was not found, so it was created automatically from `amt`.")
+
+        missing_cols = [col for col in required_columns if col not in uploaded_df.columns]
+
+        if missing_cols:
+            st.error("Your uploaded dataset is missing required columns.")
+            st.write("Missing columns:")
+            st.write(missing_cols)
+            st.info("Download the required template above and arrange your dataset in the same format.")
+
+        else:
+            if st.button("Run Batch Fraud Detection", use_container_width=True):
+                result_df, missing_columns = predict_uploaded_dataset(
+                    uploaded_df,
+                    model_pipeline,
+                    threshold
+                )
+
+                if result_df is None:
+                    st.error("Prediction failed because some required columns are missing.")
+                    st.write(missing_columns)
+
+                elif isinstance(result_df, str) and result_df == "empty":
+                    st.error("Prediction failed because valid rows were not found after cleaning numeric values.")
+
+                else:
+                    st.success("Batch fraud detection completed successfully.")
+
+                    total_rows = len(result_df)
+                    fraud_count = (result_df["prediction"] == "High Risk / Fraud").sum()
+                    safe_count = (result_df["prediction"] == "Low Risk / Safe").sum()
+                    avg_risk = result_df["risk_score"].mean()
+
+                    b1, b2, b3, b4 = st.columns(4)
+                    b1.metric("Total Checked", total_rows)
+                    b2.metric("High Risk / Fraud", fraud_count)
+                    b3.metric("Low Risk / Safe", safe_count)
+                    b4.metric("Average Risk", f"{avg_risk:.2f}%")
+
+                    st.subheader("Batch Prediction Results")
+                    st.dataframe(result_df, use_container_width=True)
+
+                    result_csv = result_df.to_csv(index=False).encode("utf-8")
+
+                    st.download_button(
+                        label="Download Batch Prediction Results",
+                        data=result_csv,
+                        file_name="batch_fraud_prediction_results.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+
+    except Exception as e:
+        st.error("Dataset upload or prediction failed.")
+        st.write("Error details:", e)
 
 
 # ---------------- SHAP SECTION ----------------
