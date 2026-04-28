@@ -631,6 +631,55 @@ st.info(
 )
 
 
+
+
+# ---------------- AI DEEP-AUDIT DASHBOARD ----------------
+st.markdown("---")
+st.subheader("AI Deep-Audit Dashboard")
+
+st.write("This dashboard summarizes manual single-transaction audit activity during the current session.")
+
+if len(st.session_state.history) > 0:
+    dashboard_df = pd.DataFrame(st.session_state.history)
+
+    total_predictions = len(dashboard_df)
+    high_risk_count = dashboard_df["Status"].str.contains("High Risk", case=False, na=False).sum()
+    safe_count = dashboard_df["Status"].str.contains("Safe|Verified", case=False, na=False).sum()
+    avg_risk_score = dashboard_df["Risk_Score"].mean()
+    max_risk_score = dashboard_df["Risk_Score"].max()
+    last_status = dashboard_df.iloc[-1]["Status"]
+
+    d1, d2, d3, d4, d5 = st.columns(5)
+    d1.metric("Total Predictions", total_predictions)
+    d2.metric("High Risk Cases", int(high_risk_count))
+    d3.metric("Safe Cases", int(safe_count))
+    d4.metric("Average Risk", f"{avg_risk_score:.2f}%")
+    d5.metric("Last Status", last_status)
+
+    d6, d7 = st.columns(2)
+
+    with d6:
+        st.markdown("### Fraud vs Safe Summary")
+        chart_data = pd.DataFrame({
+            "Status": ["High Risk / Fraud", "Low Risk / Safe"],
+            "Count": [int(high_risk_count), int(safe_count)]
+        })
+        st.bar_chart(chart_data.set_index("Status"))
+
+    with d7:
+        st.markdown("### Risk Score Trend")
+        trend_df = dashboard_df[["Time", "Risk_Score"]].copy()
+        trend_df = trend_df.set_index("Time")
+        st.line_chart(trend_df)
+
+    st.markdown("### Dashboard Snapshot")
+    s1, s2 = st.columns(2)
+    s1.metric("Maximum Risk Score", f"{max_risk_score:.2f}%")
+    s2.metric("Current Threshold", threshold)
+
+else:
+    st.info("Dashboard will appear after you run at least one forensic audit prediction.")
+
 # ---------------- PREDICTION HISTORY TABLE ----------------
 st.markdown("---")
 st.subheader("Prediction History")
@@ -736,6 +785,70 @@ if uploaded_file is not None:
                     b2.metric("High Risk / Fraud", fraud_count)
                     b3.metric("Low Risk / Safe", safe_count)
                     b4.metric("Average Risk", f"{avg_risk:.2f}%")
+
+                    # ---------------- UPLOADED DATASET ANALYSIS DASHBOARD ----------------
+                    st.markdown("---")
+                    st.subheader("Uploaded Dataset Analysis Dashboard")
+
+                    fraud_percentage = (fraud_count / total_rows) * 100 if total_rows > 0 else 0
+                    max_risk = result_df["risk_score"].max()
+                    min_risk = result_df["risk_score"].min()
+
+                    k1, k2, k3, k4 = st.columns(4)
+                    k1.metric("Total Transactions", total_rows)
+                    k2.metric("High Risk / Fraud", int(fraud_count))
+                    k3.metric("Safe Transactions", int(safe_count))
+                    k4.metric("Fraud Percentage", f"{fraud_percentage:.2f}%")
+
+                    k5, k6, k7 = st.columns(3)
+                    k5.metric("Average Risk Score", f"{avg_risk:.2f}%")
+                    k6.metric("Maximum Risk Score", f"{max_risk:.2f}%")
+                    k7.metric("Minimum Risk Score", f"{min_risk:.2f}%")
+
+                    bcol1, bcol2 = st.columns(2)
+
+                    with bcol1:
+                        st.markdown("### Fraud vs Safe Count")
+                        summary_df = pd.DataFrame({
+                            "Prediction": ["High Risk / Fraud", "Low Risk / Safe"],
+                            "Count": [int(fraud_count), int(safe_count)]
+                        })
+                        st.bar_chart(summary_df.set_index("Prediction"))
+
+                    with bcol2:
+                        st.markdown("### Risk Score Distribution")
+                        risk_bins = pd.cut(
+                            result_df["risk_score"],
+                            bins=[0, 25, 50, 75, 100],
+                            labels=["Low Risk", "Moderate Risk", "High Risk", "Critical Risk"],
+                            include_lowest=True
+                        )
+                        risk_distribution = risk_bins.value_counts().sort_index()
+                        st.bar_chart(risk_distribution)
+
+                    st.markdown("### Top 10 High-Risk Transactions")
+                    top_risky = result_df.sort_values(by="risk_score", ascending=False).head(10)
+                    st.dataframe(top_risky, use_container_width=True)
+
+                    if "category" in result_df.columns:
+                        st.markdown("### Category-wise Average Risk")
+                        category_risk = (
+                            result_df.groupby("category")["risk_score"]
+                            .mean()
+                            .sort_values(ascending=False)
+                            .reset_index()
+                        )
+                        st.bar_chart(category_risk.set_index("category"))
+
+                    if "state" in result_df.columns:
+                        st.markdown("### State-wise Average Risk")
+                        state_risk = (
+                            result_df.groupby("state")["risk_score"]
+                            .mean()
+                            .sort_values(ascending=False)
+                            .reset_index()
+                        )
+                        st.bar_chart(state_risk.set_index("state"))
 
                     st.subheader("Batch Prediction Results")
                     st.dataframe(result_df, use_container_width=True)
