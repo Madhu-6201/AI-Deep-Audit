@@ -237,7 +237,6 @@ def predict_in_chunks(input_df, model_pipeline, chunk_size=5000):
         progress_bar.progress(end / total_rows)
         status_box.info(f"Processed {end:,} of {total_rows:,} rows...")
 
-    status_box.success(f"Completed prediction for {total_rows:,} rows.")
     return np.array(all_probs)
 
 
@@ -503,9 +502,6 @@ if uploaded_file is not None:
             total_uploaded_rows = len(uploaded_df)
             chunk_size = 5000
 
-            st.info(
-                f"Uploaded rows: {total_uploaded_rows:,}. The app will analyze all uploaded rows automatically in chunks of {chunk_size:,}."
-            )
 
             if total_uploaded_rows > 50000:
                 st.warning(
