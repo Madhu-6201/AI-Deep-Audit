@@ -216,8 +216,36 @@ def auto_create_missing_features(uploaded_df):
 
 
 # ---------------- BATCH DATASET PREDICTION FUNCTION ----------------
-def predict_uploaded_dataset(uploaded_df, model_pipeline, threshold):
+def predict_in_chunks(input_df, model_pipeline, chunk_size=5000):
+    """Predict fraud probabilities in chunks to avoid memory crashes on large datasets."""
+    all_probs = []
+    total_rows = len(input_df)
+
+    progress_bar = st.progress(0)
+    status_box = st.empty()
+
+    for start in range(0, total_rows, chunk_size):
+        end = min(start + chunk_size, total_rows)
+        chunk = input_df.iloc[start:end]
+
+        try:
+            probs = model_pipeline.predict_proba(chunk)[:, 1]
+        except Exception:
+            probs = model_pipeline.predict(chunk).astype(float)
+
+        all_probs.extend(probs)
+        progress_bar.progress(end / total_rows)
+        status_box.info(f"Processed {end:,} of {total_rows:,} rows...")
+
+    status_box.success(f"Completed prediction for {total_rows:,} rows.")
+    return np.array(all_probs)
+
+
+def predict_uploaded_dataset(uploaded_df, model_pipeline, threshold, max_rows=None, chunk_size=5000):
     uploaded_df, created_features = auto_create_missing_features(uploaded_df)
+
+    if max_rows is not None:
+        uploaded_df = uploaded_df.head(int(max_rows)).copy()
 
     required_columns = [
         "merchant", "category", "amt", "amt_log", "gender", "city", "state",
@@ -242,10 +270,7 @@ def predict_uploaded_dataset(uploaded_df, model_pipeline, threshold):
     if input_df.empty:
         return "empty", [], created_features
 
-    try:
-        fraud_prob = model_pipeline.predict_proba(input_df)[:, 1]
-    except Exception:
-        fraud_prob = model_pipeline.predict(input_df).astype(float)
+    fraud_prob = predict_in_chunks(input_df, model_pipeline, chunk_size=chunk_size)
 
     result_df = uploaded_df.loc[valid_index].copy()
     result_df["fraud_probability"] = fraud_prob
@@ -380,7 +405,6 @@ with st.sidebar:
     st.title("System Parameters")
     st.write("---")
 
-    st.write("**Model Version:** v2.1.0")
     st.write("**Model Used:** XGBoost")
     st.write("**System Type:** Explainable Audit AI")
 
@@ -468,11 +492,47 @@ if uploaded_file is not None:
 
         else:
             st.success("All required columns are present. Dataset is ready for batch fraud detection.")
+
+            total_uploaded_rows = len(uploaded_df)
+            safe_cloud_limit = min(total_uploaded_rows, 50000)
+
+            st.warning(
+                "Large dataset detected. To prevent Streamlit Cloud memory crash, "
+                "the app will process a selected number of rows and use chunk prediction."
+            )
+
+            rows_to_analyze = st.number_input(
+                "How many rows do you want to analyze now?",
+                min_value=1,
+                max_value=max(1, safe_cloud_limit),
+                value=min(5000, safe_cloud_limit),
+                step=100 if safe_cloud_limit >= 100 else 1,
+                help="For Streamlit Cloud, 5,000 rows is recommended. Maximum allowed here is 50,000 rows to avoid crash."
+            )
+
+            chunk_size = st.selectbox(
+                "Prediction batch size",
+                [1000, 2500, 5000, 10000],
+                index=2,
+                help="The model predicts in small chunks so large datasets do not crash the app."
+            )
+
+            st.info(
+                f"Uploaded rows: {total_uploaded_rows:,}. This run will analyze first {int(rows_to_analyze):,} rows in chunks of {chunk_size:,}."
+            )
+
+            if total_uploaded_rows > 50000:
+                st.info(
+                    "Your file has more than 50,000 rows. For full analysis, split the file into smaller parts or run locally."
+                )
+
             if st.button("Run Batch Fraud Detection", use_container_width=True):
                 result_df, missing_columns, created_features = predict_uploaded_dataset(
                     uploaded_df,
                     model_pipeline,
-                    threshold
+                    threshold,
+                    max_rows=int(rows_to_analyze),
+                    chunk_size=int(chunk_size)
                 )
 
                 if result_df is None:
@@ -540,6 +600,11 @@ if uploaded_file is not None:
                         risk_line_df = result_df[["risk_score"]].copy()
                         risk_line_df["Transaction No."] = range(1, len(risk_line_df) + 1)
                         risk_line_df["risk_score"] = pd.to_numeric(risk_line_df["risk_score"], errors="coerce").fillna(0)
+
+                        if len(risk_line_df) > 1000:
+                            risk_line_df = risk_line_df.iloc[np.linspace(0, len(risk_line_df) - 1, 1000).astype(int)]
+                            st.caption("Line graph is sampled to 1,000 points for fast dashboard rendering.")
+
                         render_plotly_line(risk_line_df, "Transaction No.", "risk_score", "Risk Score Trend Across Uploaded Dataset")
 
                     bd3, bd4 = st.columns(2)
@@ -575,8 +640,9 @@ if uploaded_file is not None:
                     top_risky = result_df.sort_values(by="risk_score", ascending=False).head(10)
                     st.dataframe(top_risky, use_container_width=True)
 
-                    st.subheader("Batch Prediction Results")
-                    st.dataframe(result_df, use_container_width=True)
+                    st.subheader("Batch Prediction Results Preview")
+                    st.dataframe(result_df.head(100), use_container_width=True)
+                    st.info("Showing first 100 rows only to keep the app fast. Download the CSV to view all analyzed rows.")
 
                     result_csv = result_df.to_csv(index=False).encode("utf-8")
 
@@ -851,37 +917,6 @@ Generated by AI Deep-Audit System
                 use_container_width=True
             )
 
-# ---------------- RESEARCH DASHBOARD CARDS ----------------
-st.markdown("---")
-st.subheader("Dynamic Risk Scoring & False Positive Reduction")
-
-d1, d2, d3 = st.columns(3)
-
-with d1:
-    st.markdown("""
-    <div class="card">
-        <h4>Higher Accuracy</h4>
-        <p>XGBoost captures complex nonlinear fraud patterns better than many traditional baseline models.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with d2:
-    st.markdown("""
-    <div class="card-green">
-        <h4>Imbalance Handling</h4>
-        <p>Fraud cases are rare. XGBoost supports imbalance-aware learning using parameters like scale_pos_weight.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with d3:
-    st.markdown("""
-    <div class="card-red">
-        <h4>False Positive Control</h4>
-        <p>Adjustable threshold helps auditors balance fraud detection sensitivity and unnecessary alerts.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-
 # ---------------- MODEL PERFORMANCE SUMMARY ----------------
 st.markdown("---")
 st.subheader("Model Performance Summary")
@@ -964,39 +999,6 @@ try:
 
 except Exception:
     st.info("Confusion matrix interpretation could not be calculated from available data.")
-
-
-# ---------------- FALSE POSITIVE REDUCTION ANALYSIS ----------------
-st.markdown("---")
-st.subheader("False Positive Reduction Analysis")
-
-st.write("""
-Fraud detection systems often suffer from false positives, where legitimate transactions are incorrectly flagged as fraud.
-This system uses a tunable decision threshold to help auditors control the trade-off between fraud detection sensitivity
-and false alarm reduction.
-""")
-
-fp1, fp2 = st.columns(2)
-
-with fp1:
-    st.markdown("""
-    <div class="card">
-        <h4>Lower Threshold</h4>
-        <p>Detects more suspicious transactions and can reduce missed fraud cases.</p>
-        <p class="small-note">Possible drawback: more false positives.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with fp2:
-    st.markdown("""
-    <div class="card">
-        <h4>Higher Threshold</h4>
-        <p>Reduces unnecessary fraud alerts and improves auditor efficiency.</p>
-        <p class="small-note">Possible drawback: subtle fraud cases may be missed.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-st.metric("Current Fraud Detection Threshold", threshold)
 
 
 # ---------------- FEATURE IMPORTANCE / EXPLAINABILITY ----------------
@@ -1143,22 +1145,3 @@ st.image(
 st.warning(
     "This is currently a SHAP placeholder. For a stronger final version, generate real SHAP plots from your trained XGBoost model."
 )
-
-
-# ---------------- RESEARCH AUDIT SUMMARY ----------------
-st.markdown("---")
-st.subheader("Research Audit Summary")
-
-st.success("""
-This AI Deep-Audit system includes:
-
-1. XGBoost-based fraud classification  
-2. Dynamic fraud risk scoring  
-3. Threshold-based false positive reduction  
-4. Feature importance-based explainability  
-5. Confusion matrix-based error analysis  
-6. Downloadable audit report generation  
-7. Transaction prediction history tracking  
-
-These components make the system suitable for a research-oriented fraud detection project.
-""")
