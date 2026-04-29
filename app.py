@@ -118,7 +118,7 @@ st.markdown("""
 </style>
 
 <div class="header-box">
-    <h1>AI Deep-Audit Framework</h1>
+    <h1>AuditGuard AI</h1>
     <p>Explainable Financial Fraud Detection Platform</p>
 </div>
 """, unsafe_allow_html=True)
