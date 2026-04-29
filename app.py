@@ -410,7 +410,7 @@ with st.sidebar:
     st.title("System Parameters")
     st.write("---")
 
-    st.write("**Model Version:** v2.1.0")
+    
     st.write("**Model Used:** XGBoost")
     st.write("**System Type:** Explainable Audit AI")
 
