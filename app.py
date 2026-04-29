@@ -548,7 +548,7 @@ if uploaded_file is not None:
                     b6.metric("Maximum Risk", f"{max_risk:.2f}%")
                     b7.metric("Minimum Risk", f"{min_risk:.2f}%")
 
-                    st.markdown("### Tableau-Style Uploaded Dataset Dashboard")
+                    st.markdown("### Uploaded Dataset Dashboard")
                     st.markdown(
                         """
                         <div class="dashboard-note">
