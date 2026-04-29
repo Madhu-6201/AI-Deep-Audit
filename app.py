@@ -319,6 +319,53 @@ def render_plotly_histogram(df, score_col="risk_score"):
     )
     st.plotly_chart(fig, use_container_width=True)
 
+
+# ---------------- FORM VALIDATION HELPERS ----------------
+def parse_required_float(value, label, errors, min_value=None, max_value=None):
+    if value is None or str(value).strip() == "":
+        errors.append(f"Please enter {label}.")
+        return None
+    try:
+        number = float(str(value).strip())
+        if min_value is not None and number < min_value:
+            errors.append(f"{label} must be at least {min_value}.")
+        if max_value is not None and number > max_value:
+            errors.append(f"{label} must be at most {max_value}.")
+        return number
+    except ValueError:
+        errors.append(f"{label} must be a valid number.")
+        return None
+
+
+def parse_required_int(value, label, errors, min_value=None, max_value=None):
+    if value is None or str(value).strip() == "":
+        errors.append(f"Please enter {label}.")
+        return None
+    try:
+        number = int(float(str(value).strip()))
+        if min_value is not None and number < min_value:
+            errors.append(f"{label} must be at least {min_value}.")
+        if max_value is not None and number > max_value:
+            errors.append(f"{label} must be at most {max_value}.")
+        return number
+    except ValueError:
+        errors.append(f"{label} must be a valid integer.")
+        return None
+
+
+def validate_required_text(value, label, errors):
+    if value is None or str(value).strip() == "":
+        errors.append(f"Please enter {label}.")
+        return None
+    return str(value).strip()
+
+
+def validate_select(value, label, errors):
+    if value is None or str(value).startswith("Select"):
+        errors.append(f"Please select {label}.")
+        return None
+    return value
+
 # ---------------- SESSION HISTORY ----------------
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -353,7 +400,206 @@ with st.sidebar:
     )
 
 
-# ---------------- MAIN LAYOUT ----------------
+# ---------------- BATCH DATASET PREDICTION ----------------
+st.markdown("---")
+st.subheader("Batch Fraud Detection Using Uploaded Dataset")
+
+st.write("""
+Upload your own transaction dataset in CSV or Excel format. The trained XGBoost pipeline will generate fraud probability, risk score, and fraud/safe prediction for every row.
+""")
+
+required_columns = [
+    "merchant", "category", "amt", "amt_log", "gender", "city", "state",
+    "zip", "lat", "long", "city_pop", "distance_km", "job", "unix_time",
+    "merch_lat", "merch_long", "is_weekend"
+]
+
+with st.expander("Required Dataset Format"):
+    st.write("Your uploaded dataset should contain these columns. The app can automatically create `amt_log`, `distance_km`, `unix_time`, and `is_weekend` only when the required base columns are available.")
+    st.code(", ".join(required_columns), language="text")
+
+    template_df = pd.DataFrame(columns=required_columns)
+    template_csv = template_df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="Download Required Dataset Template",
+        data=template_csv,
+        file_name="required_dataset_template.csv",
+        mime="text/csv"
+    )
+
+uploaded_file = st.file_uploader("Upload transaction dataset", type=["csv", "xlsx"])
+
+if uploaded_file is None:
+    st.info("No dataset uploaded yet. Upload a CSV or Excel file to start batch fraud analysis.")
+
+if uploaded_file is not None:
+    try:
+        if uploaded_file.name.endswith(".csv"):
+            uploaded_df = pd.read_csv(uploaded_file)
+        else:
+            uploaded_df = pd.read_excel(uploaded_file)
+
+        st.success("Dataset uploaded successfully.")
+        st.write("Uploaded dataset shape:", uploaded_df.shape)
+
+        st.subheader("Uploaded Dataset Preview")
+        st.dataframe(uploaded_df.head(10), use_container_width=True)
+
+        uploaded_df, created_features = auto_create_missing_features(uploaded_df)
+
+        if created_features:
+            st.success("Automatic feature creation completed.")
+            for feature_msg in created_features:
+                st.info(feature_msg)
+        else:
+            st.info("No derived columns needed to be created automatically.")
+
+        st.subheader("Dataset Preview After Auto Feature Creation")
+        st.dataframe(uploaded_df.head(10), use_container_width=True)
+
+        missing_cols = [col for col in required_columns if col not in uploaded_df.columns]
+
+        if missing_cols:
+            st.error("Some required columns are still missing.")
+            st.write("These columns could not be created automatically because their base data is unavailable:")
+            st.write(missing_cols)
+            st.info("Download the required template above and arrange your dataset in the same format.")
+
+        else:
+            st.success("All required columns are present. Dataset is ready for batch fraud detection.")
+            if st.button("Run Batch Fraud Detection", use_container_width=True):
+                result_df, missing_columns, created_features = predict_uploaded_dataset(
+                    uploaded_df,
+                    model_pipeline,
+                    threshold
+                )
+
+                if result_df is None:
+                    st.error("Prediction failed because some required columns are missing.")
+                    st.write(missing_columns)
+
+                elif isinstance(result_df, str) and result_df == "empty":
+                    st.error("Prediction failed because valid rows were not found after cleaning numeric values.")
+
+                else:
+                    st.success("Batch fraud detection completed successfully.")
+
+                    total_rows = len(result_df)
+                    fraud_count = (result_df["prediction"] == "High Risk / Fraud").sum()
+                    safe_count = (result_df["prediction"] == "Low Risk / Safe").sum()
+                    avg_risk = result_df["risk_score"].mean()
+
+                    fraud_percentage = (fraud_count / total_rows) * 100 if total_rows > 0 else 0
+                    max_risk = result_df["risk_score"].max()
+                    min_risk = result_df["risk_score"].min()
+
+                    b1, b2, b3, b4 = st.columns(4)
+                    b1.metric("Total Checked", total_rows)
+                    b2.metric("High Risk / Fraud", fraud_count)
+                    b3.metric("Low Risk / Safe", safe_count)
+                    b4.metric("Fraud Percentage", f"{fraud_percentage:.2f}%")
+
+                    b5, b6, b7 = st.columns(3)
+                    b5.metric("Average Risk", f"{avg_risk:.2f}%")
+                    b6.metric("Maximum Risk", f"{max_risk:.2f}%")
+                    b7.metric("Minimum Risk", f"{min_risk:.2f}%")
+
+                    st.markdown("### Tableau-Style Uploaded Dataset Dashboard")
+                    st.markdown(
+                        """
+                        <div class="dashboard-note">
+                            This dashboard updates according to the uploaded dataset and shows dataset-level fraud analysis.
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    t1, t2, t3, t4, t5 = st.columns(5)
+                    with t1:
+                        render_kpi_card("Total Transactions", total_rows)
+                    with t2:
+                        render_kpi_card("High Risk", int(fraud_count))
+                    with t3:
+                        render_kpi_card("Safe", int(safe_count))
+                    with t4:
+                        render_kpi_card("Fraud %", f"{fraud_percentage:.2f}%")
+                    with t5:
+                        render_kpi_card("Max Risk", f"{max_risk:.2f}%")
+
+                    bd1, bd2 = st.columns(2)
+
+                    with bd1:
+                        batch_summary = pd.DataFrame({
+                            "Prediction": ["High Risk / Fraud", "Low Risk / Safe"],
+                            "Count": [int(fraud_count), int(safe_count)]
+                        })
+                        render_plotly_bar(batch_summary, "Prediction", "Count", "Fraud vs Safe Count")
+
+                    with bd2:
+                        risk_line_df = result_df[["risk_score"]].copy()
+                        risk_line_df["Transaction No."] = range(1, len(risk_line_df) + 1)
+                        risk_line_df["risk_score"] = pd.to_numeric(risk_line_df["risk_score"], errors="coerce").fillna(0)
+                        render_plotly_line(risk_line_df, "Transaction No.", "risk_score", "Risk Score Trend Across Uploaded Dataset")
+
+                    bd3, bd4 = st.columns(2)
+                    with bd3:
+                        render_plotly_histogram(result_df, "risk_score")
+
+                    with bd4:
+                        top_risky_chart = result_df.sort_values(by="risk_score", ascending=False).head(10).copy()
+                        top_risky_chart["Transaction"] = range(1, len(top_risky_chart) + 1)
+                        render_plotly_bar(top_risky_chart, "Transaction", "risk_score", "Top 10 High-Risk Transactions")
+
+                    if "category" in result_df.columns:
+                        st.markdown("#### Category-wise Average Risk")
+                        category_risk = (
+                            result_df.groupby("category")["risk_score"]
+                            .mean()
+                            .sort_values(ascending=False)
+                            .reset_index()
+                        )
+                        render_plotly_bar(category_risk, "category", "risk_score", "Category-wise Average Risk")
+
+                    if "state" in result_df.columns:
+                        st.markdown("#### State-wise Average Risk")
+                        state_risk = (
+                            result_df.groupby("state")["risk_score"]
+                            .mean()
+                            .sort_values(ascending=False)
+                            .reset_index()
+                        )
+                        render_plotly_bar(state_risk, "state", "risk_score", "State-wise Average Risk")
+
+                    st.markdown("#### Top 10 High-Risk Transactions Table")
+                    top_risky = result_df.sort_values(by="risk_score", ascending=False).head(10)
+                    st.dataframe(top_risky, use_container_width=True)
+
+                    st.subheader("Batch Prediction Results")
+                    st.dataframe(result_df, use_container_width=True)
+
+                    result_csv = result_df.to_csv(index=False).encode("utf-8")
+
+                    st.download_button(
+                        label="Download Batch Prediction Results",
+                        data=result_csv,
+                        file_name="batch_fraud_prediction_results.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+
+    except Exception as e:
+        st.error("Dataset upload or prediction failed.")
+        st.write("Error details:", e)
+
+
+
+
+# ---------------- SINGLE TRANSACTION INPUT FORM ----------------
+st.markdown("---")
+st.subheader("Single Transaction Fraud Check")
+st.info("Fill all required fields manually. The model will predict only after you click **Run Forensic Audit**.")
+
 col_in, col_res = st.columns([2, 1])
 
 with col_in:
@@ -362,25 +608,26 @@ with col_in:
     c1, c2 = st.columns(2)
 
     with c1:
-        amt = st.number_input(
+        amt_text = st.text_input(
             "Transaction Amount ($)",
-            min_value=0.0,
-            value=1250.0
+            placeholder="Enter transaction amount, e.g., 1250.00"
         )
 
-        city_pop = st.number_input(
+        city_pop_text = st.text_input(
             "Target City Population",
-            min_value=0,
-            value=500000
+            placeholder="Enter city population, e.g., 500000"
         )
 
         category = st.selectbox(
             "Transaction Category",
             [
+                "Select category",
                 "shopping_net",
+                "shopping_pos",
                 "grocery_pos",
                 "gas_transport",
                 "misc_net",
+                "misc_pos",
                 "entertainment",
                 "food_dining",
                 "personal_care",
@@ -391,158 +638,181 @@ with col_in:
             ]
         )
 
-        gender = st.selectbox("Gender", ["F", "M"])
+        gender = st.selectbox("Gender", ["Select gender", "F", "M"])
 
     with c2:
-        distance = st.number_input(
+        distance_text = st.text_input(
             "Distance to Merchant (km)",
-            min_value=0.0,
-            value=12.4
+            placeholder="Enter distance, e.g., 86.87"
         )
 
-        hour = st.slider(
+        hour_choice = st.selectbox(
             "Time of Transaction (24h)",
-            0,
-            23,
-            10
+            ["Select transaction hour"] + list(range(24))
         )
 
         state = st.selectbox(
             "State",
-            ["CA", "TX", "NY", "FL", "PA", "OH", "IL", "GA", "NC", "MI"]
+            [
+                "Select state",
+                "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+                "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+                "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+                "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+                "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
+            ]
         )
 
-        job = st.text_input("Customer Job", value="Engineer")
+        job = st.text_input("Customer Job", placeholder="Enter customer job, e.g., Engineer")
 
     c3, c4 = st.columns(2)
 
     with c3:
         merchant = st.text_input(
             "Merchant Name",
-            value="fraud_McDermott, Osinski and Morar"
+            placeholder="Enter merchant name, e.g., fraud_Botsford Ltd"
         )
 
-        city = st.text_input("City", value="New York")
+        city = st.text_input("City", placeholder="Enter city name, e.g., New York")
 
-        zip_code = st.number_input(
+        zip_text = st.text_input(
             "ZIP Code",
-            min_value=0,
-            value=10001
+            placeholder="Enter ZIP code, e.g., 10001"
         )
 
     with c4:
-        lat = st.number_input("Customer Latitude", value=40.7128, format="%.4f")
-        long = st.number_input("Customer Longitude", value=-74.0060, format="%.4f")
-        merch_lat = st.number_input("Merchant Latitude", value=40.7300, format="%.4f")
-        merch_long = st.number_input("Merchant Longitude", value=-73.9900, format="%.4f")
+        lat_text = st.text_input("Customer Latitude", placeholder="Enter customer latitude, e.g., 40.7128")
+        long_text = st.text_input("Customer Longitude", placeholder="Enter customer longitude, e.g., -74.0060")
+        merch_lat_text = st.text_input("Merchant Latitude", placeholder="Enter merchant latitude, e.g., 40.7300")
+        merch_long_text = st.text_input("Merchant Longitude", placeholder="Enter merchant longitude, e.g., -73.9900")
 
 with col_res:
     st.subheader("Audit Execution")
     predict_btn = st.button("Run Forensic Audit", use_container_width=True)
 
     if predict_btn:
+        errors = []
 
-        # -------- INPUT DATA --------
-        # Important: These column names must match the columns used while training model.pkl
-        now = datetime.now()
+        amt = parse_required_float(amt_text, "transaction amount", errors, min_value=0)
+        city_pop = parse_required_int(city_pop_text, "city population", errors, min_value=0)
+        distance = parse_required_float(distance_text, "distance to merchant", errors, min_value=0)
+        hour = validate_select(hour_choice, "transaction hour", errors)
+        category_value = validate_select(category, "transaction category", errors)
+        gender_value = validate_select(gender, "gender", errors)
+        state_value = validate_select(state, "state", errors)
+        job_value = validate_required_text(job, "customer job", errors)
+        merchant_value = validate_required_text(merchant, "merchant name", errors)
+        city_value = validate_required_text(city, "city", errors)
+        zip_code = parse_required_int(zip_text, "ZIP code", errors, min_value=0)
+        lat = parse_required_float(lat_text, "customer latitude", errors, min_value=-90, max_value=90)
+        long = parse_required_float(long_text, "customer longitude", errors, min_value=-180, max_value=180)
+        merch_lat = parse_required_float(merch_lat_text, "merchant latitude", errors, min_value=-90, max_value=90)
+        merch_long = parse_required_float(merch_long_text, "merchant longitude", errors, min_value=-180, max_value=180)
 
-        input_df = pd.DataFrame([{
-            "merchant": merchant,
-            "category": category,
-            "amt": amt,
-            "amt_log": np.log1p(amt),
-            "gender": gender,
-            "city": city,
-            "state": state,
-            "zip": int(zip_code),
-            "lat": lat,
-            "long": long,
-            "city_pop": city_pop,
-            "distance_km": distance,
-            "job": job,
-            "unix_time": int(now.timestamp()),
-            "merch_lat": merch_lat,
-            "merch_long": merch_long,
-            "is_weekend": 1 if now.weekday() >= 5 else 0
-        }])
+        if errors:
+            st.error("Please complete the form before prediction.")
+            for err in errors:
+                st.warning(err)
+        else:
+            now = datetime.now()
 
-        # -------- REAL MODEL PREDICTION --------
-        try:
-            risk_prob = model_pipeline.predict_proba(input_df)[0][1]
+            input_df = pd.DataFrame([{
+                "merchant": merchant_value,
+                "category": category_value,
+                "amt": amt,
+                "amt_log": np.log1p(amt),
+                "gender": gender_value,
+                "city": city_value,
+                "state": state_value,
+                "zip": int(zip_code),
+                "lat": lat,
+                "long": long,
+                "city_pop": city_pop,
+                "distance_km": distance,
+                "job": job_value,
+                "unix_time": int(now.timestamp()),
+                "merch_lat": merch_lat,
+                "merch_long": merch_long,
+                "is_weekend": 1 if now.weekday() >= 5 else 0
+            }])
 
-        except Exception:
+            # -------- REAL MODEL PREDICTION --------
             try:
-                prediction_value = model_pipeline.predict(input_df)[0]
-                risk_prob = float(prediction_value)
-            except Exception as e:
-                st.error("Prediction failed. Check whether app input columns match training columns.")
-                st.write("Error details:", e)
-                st.stop()
+                risk_prob = model_pipeline.predict_proba(input_df)[0][1]
 
-        risk_score = round(risk_prob * 100, 2)
+            except Exception:
+                try:
+                    prediction_value = model_pipeline.predict(input_df)[0]
+                    risk_prob = float(prediction_value)
+                except Exception as e:
+                    st.error("Prediction failed. Check whether app input columns match training columns.")
+                    st.write("Error details:", e)
+                    st.stop()
 
-        if risk_prob >= threshold:
-            status = "High Risk / Flagged"
-            st.markdown(
-                f"<div class='risk-high'>HIGH RISK: {risk_score}%</div>",
-                unsafe_allow_html=True
-            )
-        else:
-            status = "Verified / Safe"
-            st.markdown(
-                f"<div class='risk-low'>LOW RISK: {risk_score}%</div>",
-                unsafe_allow_html=True
-            )
+            risk_score = round(risk_prob * 100, 2)
 
-        st.write("---")
+            if risk_prob >= threshold:
+                status = "High Risk / Flagged"
+                st.markdown(
+                    f"<div class='risk-high'>HIGH RISK: {risk_score}%</div>",
+                    unsafe_allow_html=True
+                )
+            else:
+                status = "Verified / Safe"
+                st.markdown(
+                    f"<div class='risk-low'>LOW RISK: {risk_score}%</div>",
+                    unsafe_allow_html=True
+                )
 
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Risk Score", f"{risk_score}%")
-        m2.metric("Model", "XGBoost")
-        m3.metric("Threshold", threshold)
+            st.write("---")
 
-        # -------- REASONS --------
-        st.subheader("Auditor Decision Support")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Risk Score", f"{risk_score}%")
+            m2.metric("Model", "XGBoost")
+            m3.metric("Threshold", threshold)
 
-        reasons = []
+            # -------- REASONS --------
+            st.subheader("Auditor Decision Support")
 
-        if amt > 1000:
-            reasons.append("High transaction amount detected.")
-        if hour < 6 or hour > 22:
-            reasons.append("Transaction happened at unusual time.")
-        if distance > 50:
-            reasons.append("Merchant distance is unusually high.")
-        if city_pop < 50000:
-            reasons.append("Transaction from low population region.")
+            reasons = []
 
-        if reasons:
-            for reason in reasons:
-                st.warning(reason)
-        else:
-            st.info("No strong manual fraud indicators found.")
+            if amt > 1000:
+                reasons.append("High transaction amount detected.")
+            if int(hour) < 6 or int(hour) > 22:
+                reasons.append("Transaction happened at unusual time.")
+            if distance > 50:
+                reasons.append("Merchant distance is unusually high.")
+            if city_pop < 50000:
+                reasons.append("Transaction from low population region.")
 
-        # -------- HISTORY --------
-        st.session_state.history.append({
-            "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Amount": amt,
-            "Hour": hour,
-            "Distance_km": distance,
-            "City_Population": city_pop,
-            "Risk_Score": risk_score,
-            "Threshold": threshold,
-            "Status": status
-        })
+            if reasons:
+                for reason in reasons:
+                    st.warning(reason)
+            else:
+                st.info("No strong manual fraud indicators found.")
 
-        st.session_state.last_prediction = {
-            "input_df": input_df,
-            "risk_prob": risk_prob,
-            "risk_score": risk_score,
-            "status": status,
-            "reasons": reasons
-        }
+            # -------- HISTORY --------
+            st.session_state.history.append({
+                "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Amount": amt,
+                "Hour": int(hour),
+                "Distance_km": distance,
+                "City_Population": city_pop,
+                "Risk_Score": risk_score,
+                "Threshold": threshold,
+                "Status": status
+            })
 
-        # -------- REPORT DOWNLOAD --------
-        report_data = f"""
+            st.session_state.last_prediction = {
+                "input_df": input_df,
+                "risk_prob": risk_prob,
+                "risk_score": risk_score,
+                "status": status,
+                "reasons": reasons
+            }
+
+            # -------- REPORT DOWNLOAD --------
+            report_data = f"""
 AI DEEP-AUDIT REPORT
 ----------------------------
 
@@ -553,7 +823,7 @@ Threshold Used: {threshold}
 
 Transaction Details:
 Amount: ${amt}
-Transaction Hour: {hour}:00
+Transaction Hour: {int(hour)}:00
 Merchant Distance: {distance} km
 City Population: {city_pop}
 
@@ -571,16 +841,15 @@ Research-Oriented System Components:
 Generated by AI Deep-Audit System
 """
 
-        report_bytes = BytesIO(report_data.encode())
+            report_bytes = BytesIO(report_data.encode())
 
-        st.download_button(
-            label="Download Audit Report",
-            data=report_bytes,
-            file_name="Audit_Report.txt",
-            mime="text/plain",
-            use_container_width=True
-        )
-
+            st.download_button(
+                label="Download Audit Report",
+                data=report_bytes,
+                file_name="Audit_Report.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
 
 # ---------------- RESEARCH DASHBOARD CARDS ----------------
 st.markdown("---")
@@ -855,199 +1124,6 @@ else:
     st.info("No predictions yet. Run forensic audit to see history.")
 
 
-
-
-# ---------------- BATCH DATASET PREDICTION ----------------
-st.markdown("---")
-st.subheader("Batch Fraud Detection Using Uploaded Dataset")
-
-st.write("""
-Upload your own transaction dataset in CSV or Excel format. The trained XGBoost pipeline will generate fraud probability, risk score, and fraud/safe prediction for every row.
-""")
-
-required_columns = [
-    "merchant", "category", "amt", "amt_log", "gender", "city", "state",
-    "zip", "lat", "long", "city_pop", "distance_km", "job", "unix_time",
-    "merch_lat", "merch_long", "is_weekend"
-]
-
-with st.expander("Required Dataset Format"):
-    st.write("Your uploaded dataset should contain these columns. The app can automatically create `amt_log`, `distance_km`, `unix_time`, and `is_weekend` only when the required base columns are available.")
-    st.code(", ".join(required_columns), language="text")
-
-    template_df = pd.DataFrame(columns=required_columns)
-    template_csv = template_df.to_csv(index=False).encode("utf-8")
-
-    st.download_button(
-        label="Download Required Dataset Template",
-        data=template_csv,
-        file_name="required_dataset_template.csv",
-        mime="text/csv"
-    )
-
-uploaded_file = st.file_uploader("Upload transaction dataset", type=["csv", "xlsx"])
-
-if uploaded_file is None:
-    st.info("No dataset uploaded yet. Upload a CSV or Excel file to start batch fraud analysis.")
-
-if uploaded_file is not None:
-    try:
-        if uploaded_file.name.endswith(".csv"):
-            uploaded_df = pd.read_csv(uploaded_file)
-        else:
-            uploaded_df = pd.read_excel(uploaded_file)
-
-        st.success("Dataset uploaded successfully.")
-        st.write("Uploaded dataset shape:", uploaded_df.shape)
-
-        st.subheader("Uploaded Dataset Preview")
-        st.dataframe(uploaded_df.head(10), use_container_width=True)
-
-        uploaded_df, created_features = auto_create_missing_features(uploaded_df)
-
-        if created_features:
-            st.success("Automatic feature creation completed.")
-            for feature_msg in created_features:
-                st.info(feature_msg)
-        else:
-            st.info("No derived columns needed to be created automatically.")
-
-        st.subheader("Dataset Preview After Auto Feature Creation")
-        st.dataframe(uploaded_df.head(10), use_container_width=True)
-
-        missing_cols = [col for col in required_columns if col not in uploaded_df.columns]
-
-        if missing_cols:
-            st.error("Some required columns are still missing.")
-            st.write("These columns could not be created automatically because their base data is unavailable:")
-            st.write(missing_cols)
-            st.info("Download the required template above and arrange your dataset in the same format.")
-
-        else:
-            st.success("All required columns are present. Dataset is ready for batch fraud detection.")
-            if st.button("Run Batch Fraud Detection", use_container_width=True):
-                result_df, missing_columns, created_features = predict_uploaded_dataset(
-                    uploaded_df,
-                    model_pipeline,
-                    threshold
-                )
-
-                if result_df is None:
-                    st.error("Prediction failed because some required columns are missing.")
-                    st.write(missing_columns)
-
-                elif isinstance(result_df, str) and result_df == "empty":
-                    st.error("Prediction failed because valid rows were not found after cleaning numeric values.")
-
-                else:
-                    st.success("Batch fraud detection completed successfully.")
-
-                    total_rows = len(result_df)
-                    fraud_count = (result_df["prediction"] == "High Risk / Fraud").sum()
-                    safe_count = (result_df["prediction"] == "Low Risk / Safe").sum()
-                    avg_risk = result_df["risk_score"].mean()
-
-                    fraud_percentage = (fraud_count / total_rows) * 100 if total_rows > 0 else 0
-                    max_risk = result_df["risk_score"].max()
-                    min_risk = result_df["risk_score"].min()
-
-                    b1, b2, b3, b4 = st.columns(4)
-                    b1.metric("Total Checked", total_rows)
-                    b2.metric("High Risk / Fraud", fraud_count)
-                    b3.metric("Low Risk / Safe", safe_count)
-                    b4.metric("Fraud Percentage", f"{fraud_percentage:.2f}%")
-
-                    b5, b6, b7 = st.columns(3)
-                    b5.metric("Average Risk", f"{avg_risk:.2f}%")
-                    b6.metric("Maximum Risk", f"{max_risk:.2f}%")
-                    b7.metric("Minimum Risk", f"{min_risk:.2f}%")
-
-                    st.markdown("### Tableau-Style Uploaded Dataset Dashboard")
-                    st.markdown(
-                        """
-                        <div class="dashboard-note">
-                            This dashboard updates according to the uploaded dataset and shows dataset-level fraud analysis.
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-                    t1, t2, t3, t4, t5 = st.columns(5)
-                    with t1:
-                        render_kpi_card("Total Transactions", total_rows)
-                    with t2:
-                        render_kpi_card("High Risk", int(fraud_count))
-                    with t3:
-                        render_kpi_card("Safe", int(safe_count))
-                    with t4:
-                        render_kpi_card("Fraud %", f"{fraud_percentage:.2f}%")
-                    with t5:
-                        render_kpi_card("Max Risk", f"{max_risk:.2f}%")
-
-                    bd1, bd2 = st.columns(2)
-
-                    with bd1:
-                        batch_summary = pd.DataFrame({
-                            "Prediction": ["High Risk / Fraud", "Low Risk / Safe"],
-                            "Count": [int(fraud_count), int(safe_count)]
-                        })
-                        render_plotly_bar(batch_summary, "Prediction", "Count", "Fraud vs Safe Count")
-
-                    with bd2:
-                        risk_line_df = result_df[["risk_score"]].copy()
-                        risk_line_df["Transaction No."] = range(1, len(risk_line_df) + 1)
-                        risk_line_df["risk_score"] = pd.to_numeric(risk_line_df["risk_score"], errors="coerce").fillna(0)
-                        render_plotly_line(risk_line_df, "Transaction No.", "risk_score", "Risk Score Trend Across Uploaded Dataset")
-
-                    bd3, bd4 = st.columns(2)
-                    with bd3:
-                        render_plotly_histogram(result_df, "risk_score")
-
-                    with bd4:
-                        top_risky_chart = result_df.sort_values(by="risk_score", ascending=False).head(10).copy()
-                        top_risky_chart["Transaction"] = range(1, len(top_risky_chart) + 1)
-                        render_plotly_bar(top_risky_chart, "Transaction", "risk_score", "Top 10 High-Risk Transactions")
-
-                    if "category" in result_df.columns:
-                        st.markdown("#### Category-wise Average Risk")
-                        category_risk = (
-                            result_df.groupby("category")["risk_score"]
-                            .mean()
-                            .sort_values(ascending=False)
-                            .reset_index()
-                        )
-                        render_plotly_bar(category_risk, "category", "risk_score", "Category-wise Average Risk")
-
-                    if "state" in result_df.columns:
-                        st.markdown("#### State-wise Average Risk")
-                        state_risk = (
-                            result_df.groupby("state")["risk_score"]
-                            .mean()
-                            .sort_values(ascending=False)
-                            .reset_index()
-                        )
-                        render_plotly_bar(state_risk, "state", "risk_score", "State-wise Average Risk")
-
-                    st.markdown("#### Top 10 High-Risk Transactions Table")
-                    top_risky = result_df.sort_values(by="risk_score", ascending=False).head(10)
-                    st.dataframe(top_risky, use_container_width=True)
-
-                    st.subheader("Batch Prediction Results")
-                    st.dataframe(result_df, use_container_width=True)
-
-                    result_csv = result_df.to_csv(index=False).encode("utf-8")
-
-                    st.download_button(
-                        label="Download Batch Prediction Results",
-                        data=result_csv,
-                        file_name="batch_fraud_prediction_results.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-
-    except Exception as e:
-        st.error("Dataset upload or prediction failed.")
-        st.write("Error details:", e)
 
 
 # ---------------- SHAP SECTION ----------------
