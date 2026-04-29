@@ -1121,14 +1121,3 @@ SHAP can be used to explain individual fraud predictions by showing how each fea
 toward fraud or legitimate classification. This improves auditor trust and model transparency.
 """)
 
-st.image(
-    "https://raw.githubusercontent.com/slundberg/shap/master/docs/artwork/shap_header.png",
-    caption="SHAP Explainability Support for Auditor Trust"
-)
-
-st.warning(
-    "This is currently a SHAP placeholder. For a stronger final version, generate real SHAP plots from your trained XGBoost model."
-)
-
-
-
